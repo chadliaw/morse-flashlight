@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>燈語 — 英文與摩斯燈號互譯</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0b0f0d;
+    --panel: #121815;
+    --panel-2: #0e1311;
+    --line: #1f2925;
+    --amber: #ffb020;
+    --amber-dim: #6b4712;
+    --amber-glow: rgba(255,176,32,0.55);
+    --text: #eae7dd;
+    --text-dim: #8b9188;
+    --danger: #ff6b5e;
+    --ok: #6fd8a8;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(255,176,32,0.06), transparent 60%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Inter',system-ui,sans-serif;
+    min-height:100svh;
+    padding: 28px 18px 60px;
+    display:flex;
+    justify-content:center;
+  }
+  .wrap{ width:100%; max-width:560px; }
+
+  .eyebrow{
+    font-family:'Space Mono',monospace;
+    font-size:12px;
+    letter-spacing:.24em;
+    color:var(--text-dim);
+    text-transform:uppercase;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:6px;
+  }
+  .eyebrow::before{
+    content:"";
+    width:6px;height:6px;border-radius:50%;
+    background:var(--amber);
+    box-shadow:0 0 8px var(--amber-glow);
+    flex-shrink:0;
+  }
+  h1{
+    font-family:'Space Mono',monospace;
+    font-weight:700;
+    font-size:27px;
+    line-height:1.28;
+    margin: 0 0 4px;
+    letter-spacing:-0.01em;
+  }
+  .sub{
+    color:var(--text-dim);
+    font-size:14.5px;
+    line-height:1.6;
+    margin:0 0 22px;
+  }
+
+  /* --- Tabs --- */
+  .tabs{
+    display:flex;
+    gap:6px;
+    padding:4px;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:12px;
+    margin-bottom:22px;
+  }
+  .tab-btn{
+    flex:1;
+    background:transparent;
+    border:none;
+    color:var(--text-dim);
+    font-family:'Space Mono',monospace;
+    font-weight:700;
+    font-size:13px;
+    letter-spacing:.06em;
+    padding:11px 8px;
+    border-radius:9px;
+    cursor:pointer;
+    transition: background 120ms ease, color 120ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab-btn.active{
+    background:var(--amber);
+    color:#1a1305;
+  }
+  .panel-view{ display:none; }
+  .panel-view.active{ display:block; }
+
+  /* --- Signal lamp (shared signature element) --- */
+  .lamp-stage{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding: 6px 0 8px;
+  }
+  .lamp{
+    width:112px; height:112px;
+    border-radius:50%;
+    position:relative;
+    display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(circle at 35% 30%, #1a2220, #0c100e 70%);
+    border:1px solid var(--line);
+    transition: box-shadow 60ms linear, background 60ms linear;
+  }
+  .lamp::before{
+    content:"";
+    position:absolute; inset:-36px;
+    border-radius:50%;
+    background: radial-gradient(circle, var(--amber-glow), transparent 70%);
+    opacity:0;
+    transition: opacity 60ms linear;
+  }
+  .lamp-core{
+    width:54px;height:54px;border-radius:50%;
+    background: var(--amber-dim);
+    box-shadow: inset 0 0 10px rgba(0,0,0,.5);
+    transition: background 60ms linear, box-shadow 60ms linear;
+  }
+  .lamp.on{
+    background: radial-gradient(circle at 35% 30%, #2a2016, #14100a 70%);
+    box-shadow: 0 0 40px 6px var(--amber-glow);
+  }
+  .lamp.on::before{ opacity:1; }
+  .lamp.on .lamp-core{
+    background: var(--amber);
+    box-shadow: 0 0 24px 8px var(--amber-glow), inset 0 0 10px rgba(0,0,0,.15);
+  }
+  .lamp-status{
+    margin-top:12px;
+    font-family:'Space Mono',monospace;
+    font-size:11.5px;
+    letter-spacing:.08em;
+    color:var(--text-dim);
+    text-align:center;
+    min-height:16px;
+  }
+  .lamp-status.ok{ color:var(--ok); }
+  .lamp-status.err{ color:var(--danger); }
+
+  /* --- Panels --- */
+  .panel{
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:18px;
+    margin-bottom:16px;
+  }
+  label{
+    display:block;
+    font-size:12.5px;
+    font-weight:600;
+    color:var(--text-dim);
+    margin-bottom:8px;
+    letter-spacing:.02em;
+  }
+  textarea{
+    width:100%;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    border-radius:10px;
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    font-size:16px;
+    padding:12px 13px;
+    resize:none;
+    min-height:78px;
+    line-height:1.5;
+  }
+  textarea:focus, button:focus-visible, input[type=range]:focus-visible{
+    outline:2px solid var(--amber);
+    outline-offset:2px;
+  }
+  .hint{ font-size:12px; color:var(--text-dim); margin-top:8px; }
+
+  .morse-tape{
+    font-family:'Space Mono',monospace;
+    font-size:15px;
+    line-height:1.9;
+    color:var(--amber);
+    word-break:break-all;
+    min-height:24px;
+  }
+  .morse-tape .slash{ color: var(--text-dim); }
+  .morse-tape.empty{ color:var(--text-dim); }
+
+  .decoded-text{
+    font-family:'Inter',sans-serif;
+    font-size:18px;
+    font-weight:600;
+    line-height:1.6;
+    min-height:28px;
+    word-break:break-word;
+  }
+  .decoded-text.empty{ color:var(--text-dim); font-weight:400; }
+
+  .row{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:4px;
+  }
+  .row .val{
+    font-family:'Space Mono',monospace;
+    font-size:13px;
+    color:var(--amber);
+  }
+  input[type=range]{
+    width:100%;
+    accent-color:var(--amber);
+    height:28px;
+    background:transparent;
+  }
+
+  .btn-group{ display:flex; gap:10px; margin-top:4px; }
+  button{
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:14.5px;
+    border-radius:10px;
+    border:1px solid var(--line);
+    padding:13px 16px;
+    cursor:pointer;
+    transition: transform 80ms ease, opacity 80ms ease, background 80ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button:active{ transform: scale(0.97); }
+  button:disabled{ opacity:.4; cursor:not-allowed; }
+
+  .btn-primary{
+    flex:1;
+    background:var(--amber);
+    color:#1a1305;
+    border-color:var(--amber);
+  }
+  .btn-secondary{
+    background:transparent;
+    color:var(--text);
+  }
+  .btn-enable{
+    width:100%;
+    background:transparent;
+    color:var(--amber);
+    border-color:var(--amber-dim);
+    margin-bottom:14px;
+  }
+
+  /* --- Receive / camera view --- */
+  .scope{
+    position:relative;
+    width:100%;
+    max-width:240px;
+    aspect-ratio:1/1;
+    margin:0 auto 14px;
+    border-radius:16px;
+    overflow:hidden;
+    background:#000;
+    border:1px solid var(--line);
+  }
+  .scope video{
+    width:100%; height:100%;
+    object-fit:cover;
+    display:block;
+  }
+  .scope .crosshair{
+    position:absolute;
+    top:25%; left:25%; width:50%; height:50%;
+    border:1px dashed rgba(255,176,32,0.55);
+    border-radius:6px;
+    pointer-events:none;
+  }
+  .scope .crosshair::before, .scope .crosshair::after{
+    content:"";
+    position:absolute;
+    background:rgba(255,176,32,0.55);
+  }
+  .scope .crosshair::before{ top:50%; left:-6px; right:-6px; height:1px; }
+  .scope .crosshair::after{ left:50%; top:-6px; bottom:-6px; width:1px; }
+  .scope-placeholder{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--text-dim);
+    font-size:12.5px;
+    text-align:center;
+    padding:20px;
+  }
+
+  .signal-bar{
+    width:100%;
+    height:8px;
+    border-radius:5px;
+    background:var(--panel-2);
+    border:1px solid var(--line);
+    overflow:hidden;
+    margin-bottom:6px;
+  }
+  .signal-fill{
+    height:100%;
+    width:0%;
+    background: var(--amber);
+    box-shadow: 0 0 8px var(--amber-glow);
+    transition: width 40ms linear;
+  }
+  .signal-label{
+    font-family:'Space Mono',monospace;
+    font-size:10.5px;
+    color:var(--text-dim);
+    letter-spacing:.06em;
+    text-align:center;
+    margin-bottom:16px;
+  }
+
+  footer{
+    margin-top:8px;
+    font-size:12px;
+    color:var(--text-dim);
+    line-height:1.7;
+    text-align:center;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .lamp, .lamp::before, .lamp-core{ transition:none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">LIGHT SIGNAL / 燈語收發</div>
+  <h1>把英文和燈語，互相翻譯。</h1>
+  <p class="sub">輸入句子，用手電筒送出摩斯電碼；或切到「接收」，用鏡頭對準閃爍的光，即時解碼回文字。</p>
+
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="send">發送</button>
+    <button class="tab-btn" data-tab="receive">接收</button>
+  </div>
+
+  <!-- ===================== SEND PANEL ===================== -->
+  <section class="panel-view active" id="sendPanel">
+
+    <div class="lamp-stage">
+      <div class="lamp" id="lamp"><div class="lamp-core"></div></div>
+      <div class="lamp-status" id="lampStatus">尚未啟用手電筒 · 目前以螢幕光號顯示</div>
+    </div>
+
+    <button class="btn-enable" id="enableBtn">啟用手機手電筒</button>
+
+    <div class="panel">
+      <label for="input">英文句子</label>
+      <textarea id="input" maxlength="200" placeholder="例如：SOS SEND HELP">SOS</textarea>
+      <p class="hint">支援英文字母、數字與常見標點；空白會轉換成「詞間停頓」。</p>
+    </div>
+
+    <div class="panel">
+      <label>摩斯電碼</label>
+      <div class="morse-tape empty" id="tape">· · · − − − · · ·</div>
+    </div>
+
+    <div class="panel">
+      <div class="row">
+        <label style="margin-bottom:0;">閃光速度</label>
+        <span class="val" id="wpmVal">12 WPM</span>
+      </div>
+      <input type="range" id="wpm" min="4" max="30" value="12" step="1">
+    </div>
+
+    <div class="btn-group">
+      <button class="btn-primary" id="playBtn">▶ 開始發送</button>
+      <button class="btn-secondary" id="stopBtn" disabled>■ 停止</button>
+    </div>
+
+    <footer>
+      手電筒控制需要相機權限，且僅在部分 Android + Chrome 瀏覽器支援（iOS Safari 目前不支援網頁控制手電筒）。<br>
+      若手電筒無法使用，畫面上的燈號仍會依照正確節奏閃爍，可作為視覺替代方案。
+    </footer>
+  </section>
+
+  <!-- ===================== RECEIVE PANEL ===================== -->
+  <section class="panel-view" id="receivePanel">
+
+    <div class="scope" id="scope">
+      <video id="rxVideo" playsinline muted autoplay></video>
+      <div class="crosshair" id="crosshair" style="display:none;"></div>
+      <div class="scope-placeholder" id="scopePlaceholder">按下方按鈕啟用鏡頭，並將取景框對準閃爍的光源</div>
+    </div>
+
+    <div class="signal-bar"><div class="signal-fill" id="signalFill"></div></div>
+    <div class="signal-label" id="signalLabel">訊號強度</div>
+
+    <div class="lamp-stage" style="padding-top:0;">
+      <div class="lamp" id="rxLamp"><div class="lamp-core"></div></div>
+      <div class="lamp-status" id="rxStatus">尚未啟用鏡頭</div>
+    </div>
+
+    <button class="btn-enable" id="rxEnableBtn">啟用鏡頭並開始接收</button>
+
+    <div class="btn-group" style="margin-bottom:16px;">
+      <button class="btn-secondary" id="rxStopBtn" disabled style="flex:1;">■ 停止接收</button>
+      <button class="btn-secondary" id="rxClearBtn" style="flex:1;">清除結果</button>
+    </div>
+
+    <div class="panel">
+      <label>接收到的摩斯電碼</label>
+      <div class="morse-tape empty" id="rxTape">（尚無訊號）</div>
+    </div>
+
+    <div class="panel">
+      <label>解碼文字</label>
+      <div class="decoded-text empty" id="rxText">（尚無解碼結果）</div>
+    </div>
+
+    <footer>
+      這個方向只需要一般鏡頭權限，iOS / Android 都可使用。請將取景框對準閃爍的燈光，環境越暗、光源越單純，辨識越準確。<br>
+      系統會自動抓取對方閃燈的速度，開始接收後建議先送幾個穩定的點（· · ·）讓它校正節奏。
+    </footer>
+  </section>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- Morse table (shared) ----------
+  const MORSE = {
+    'A':'.-','B':'-...','C':'-.-.','D':'-..','E':'.','F':'..-.','G':'--.','H':'....',
+    'I':'..','J':'.---','K':'-.-','L':'.-..','M':'--','N':'-.','O':'---','P':'.--.',
+    'Q':'--.-','R':'.-.','S':'...','T':'-','U':'..-','V':'...-','W':'.--','X':'-..-',
+    'Y':'-.--','Z':'--..',
+    '0':'-----','1':'.----','2':'..---','3':'...--','4':'....-','5':'.....',
+    '6':'-....','7':'--...','8':'---..','9':'----.',
+    '.':'.-.-.-', ',':'--..--', '?':'..--..', "'":'.----.', '!':'-.-.--',
+    '/':'-..-.', '(':'-.--.', ')':'-.--.-', '&':'.-...', ':':'---...',
+    ';':'-.-.-.', '=':'-...-', '+':'.-.-.', '-':'-....-', '_':'..--.-',
+    '"':'.-..-.', '$':'...-..-', '@':'.--.-.'
+  };
+  const REVERSE_MORSE = Object.fromEntries(Object.entries(MORSE).map(([k,v]) => [v,k]));
+
+  // ---------- Tabs ----------
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const sendPanel = document.getElementById('sendPanel');
+  const receivePanel = document.getElementById('receivePanel');
+  tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      tabBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const isSend = btn.dataset.tab === 'send';
+      sendPanel.classList.toggle('active', isSend);
+      receivePanel.classList.toggle('active', !isSend);
+    });
+  });
+
+  /* =====================================================================
+     SEND (text -> morse -> flash)
+  ===================================================================== */
+
+  function sentenceToMorse(text){
+    const words = text.trim().toUpperCase().split(/\s+/).filter(Boolean);
+    return words.map(word => {
+      const letters = [];
+      for (const ch of word){
+        if (MORSE[ch]) letters.push(MORSE[ch]);
+      }
+      return letters;
+    }).filter(w => w.length > 0);
+  }
+
+  function morseToPulses(words){
+    const pulses = [];
+    words.forEach((word, wi) => {
+      word.forEach((letter, li) => {
+        [...letter].forEach((sym, si) => {
+          pulses.push({ on:true, units: sym === '.' ? 1 : 3 });
+          if (si < letter.length - 1) pulses.push({ on:false, units:1 });
+        });
+        if (li < word.length - 1) pulses.push({ on:false, units:3 });
+      });
+      if (wi < words.length - 1) pulses.push({ on:false, units:7 });
+    });
+    return pulses;
+  }
+
+  function formatTape(words){
+    return words.map(word => word.join(' ')).join(' <span class="slash">/</span> ');
+  }
+
+  const $input = document.getElementById('input');
+  const $tape = document.getElementById('tape');
+  const $wpm = document.getElementById('wpm');
+  const $wpmVal = document.getElementById('wpmVal');
+  const $playBtn = document.getElementById('playBtn');
+  const $stopBtn = document.getElementById('stopBtn');
+  const $enableBtn = document.getElementById('enableBtn');
+  const $lamp = document.getElementById('lamp');
+  const $lampStatus = document.getElementById('lampStatus');
+
+  function renderTape(){
+    const words = sentenceToMorse($input.value);
+    if (words.length === 0){
+      $tape.textContent = '（輸入文字後，這裡會顯示對應的摩斯電碼）';
+      $tape.classList.add('empty');
+    } else {
+      $tape.innerHTML = formatTape(words);
+      $tape.classList.remove('empty');
+    }
+  }
+  $input.addEventListener('input', renderTape);
+  renderTape();
+
+  $wpm.addEventListener('input', () => {
+    $wpmVal.textContent = $wpm.value + ' WPM';
+  });
+
+  let track = null;
+  let torchSupported = false;
+
+  async function enableTorch(){
+    $enableBtn.disabled = true;
+    $enableBtn.textContent = '正在請求相機權限…';
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } }
+      });
+      track = stream.getVideoTracks()[0];
+      const caps = track.getCapabilities ? track.getCapabilities() : {};
+      if (caps.torch){
+        torchSupported = true;
+        $lampStatus.textContent = '手電筒已啟用 · 將依節奏實際閃爍';
+        $lampStatus.className = 'lamp-status ok';
+        $enableBtn.textContent = '手電筒已啟用';
+      } else {
+        $lampStatus.textContent = '此裝置/瀏覽器不支援手電筒控制 · 改用螢幕燈號';
+        $lampStatus.className = 'lamp-status err';
+        $enableBtn.textContent = '重新嘗試啟用手電筒';
+        $enableBtn.disabled = false;
+      }
+    } catch(err){
+      $lampStatus.textContent = '相機權限被拒絕或無法使用 · 改用螢幕燈號';
+      $lampStatus.className = 'lamp-status err';
+      $enableBtn.textContent = '重新嘗試啟用手電筒';
+      $enableBtn.disabled = false;
+    }
+  }
+  $enableBtn.addEventListener('click', enableTorch);
+
+  function setLight(on){
+    $lamp.classList.toggle('on', on);
+    if (torchSupported && track){
+      track.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {
+        torchSupported = false;
+        $lampStatus.textContent = '手電筒控制中斷 · 改用螢幕燈號';
+        $lampStatus.className = 'lamp-status err';
+      });
+    }
+  }
+
+  let generation = 0;
+
+  function setPlayingUI(isPlaying){
+    $playBtn.disabled = isPlaying;
+    $stopBtn.disabled = !isPlaying;
+    $input.disabled = isPlaying;
+    $wpm.disabled = isPlaying;
+    $playBtn.textContent = isPlaying ? '發送中…' : '▶ 開始發送';
+  }
+
+  function play(){
+    const words = sentenceToMorse($input.value);
+    if (words.length === 0) return;
+
+    const pulses = morseToPulses(words);
+    const wpm = parseInt($wpm.value, 10);
+    const unitMs = 1200 / wpm;
+
+    generation++;
+    const myGen = generation;
+    setPlayingUI(true);
+
+    let i = 0;
+    function step(){
+      if (myGen !== generation) return;
+      if (i >= pulses.length){
+        setLight(false);
+        setPlayingUI(false);
+        return;
+      }
+      const p = pulses[i++];
+      setLight(p.on);
+      setTimeout(step, p.units * unitMs);
+    }
+    step();
+  }
+
+  function stop(){
+    generation++;
+    setLight(false);
+    setPlayingUI(false);
+  }
+
+  $playBtn.addEventListener('click', play);
+  $stopBtn.addEventListener('click', stop);
+
+  window.addEventListener('beforeunload', () => {
+    if (track) track.stop();
+    if (rxStream) rxStream.getTracks().forEach(t => t.stop());
+  });
+
+  /* =====================================================================
+     RECEIVE (camera -> light -> morse -> text)
+  ===================================================================== */
+
+  const $rxVideo = document.getElementById('rxVideo');
+  const $crosshair = document.getElementById('crosshair');
+  const $scopePlaceholder = document.getElementById('scopePlaceholder');
+  const $rxEnableBtn = document.getElementById('rxEnableBtn');
+  const $rxStopBtn = document.getElementById('rxStopBtn');
+  const $rxClearBtn = document.getElementById('rxClearBtn');
+  const $rxLamp = document.getElementById('rxLamp');
+  const $rxStatus = document.getElementById('rxStatus');
+  const $signalFill = document.getElementById('signalFill');
+  const $signalLabel = document.getElementById('signalLabel');
+  const $rxTape = document.getElementById('rxTape');
+  const $rxText = document.getElementById('rxText');
+
+  let rxStream = null;
+  let rxRunning = false;
+  let rxRafId = null;
+
+  const SAMPLE = 16; // downsample size for brightness sampling
+  const rxCanvas = document.createElement('canvas');
+  rxCanvas.width = SAMPLE; rxCanvas.height = SAMPLE;
+  const rxCtx = rxCanvas.getContext('2d', { willReadFrequently: true });
+
+  const CONFIRM_FRAMES = 2;
+  const WINDOW_SIZE = 45; // ~ frames used to auto-calibrate brightness range
+
+  let brightWindow = [];
+  let confirmedState = false;
+  let candidateState = false;
+  let candidateCount = 0;
+  let lastTransitionTime = null;
+
+  let unit = null;           // estimated dot length in ms
+  let currentSymbols = '';   // dots/dashes for the letter in progress
+  let decodedLetters = [];   // finished letters/spaces as morse groups, for the tape display
+  let decodedText = '';
+
+  function resetDecoder(){
+    brightWindow = [];
+    confirmedState = false;
+    candidateState = false;
+    candidateCount = 0;
+    lastTransitionTime = null;
+    unit = null;
+    currentSymbols = '';
+    decodedLetters = [];
+    decodedText = '';
+    updateRxTape();
+    updateRxText();
+    $signalFill.style.width = '0%';
+    $signalLabel.textContent = '訊號強度';
+  }
+
+  function updateRxTape(){
+    const shown = decodedLetters.join(' ') + (currentSymbols ? (decodedLetters.length ? ' ' : '') + currentSymbols : '');
+    if (!shown){
+      $rxTape.textContent = '（尚無訊號）';
+      $rxTape.classList.add('empty');
+    } else {
+      $rxTape.textContent = shown;
+      $rxTape.classList.remove('empty');
+    }
+  }
+
+  function updateRxText(){
+    if (!decodedText){
+      $rxText.textContent = '（尚無解碼結果）';
+      $rxText.classList.add('empty');
+    } else {
+      $rxText.textContent = decodedText;
+      $rxText.classList.remove('empty');
+    }
+  }
+
+  function finalizeLetter(){
+    if (!currentSymbols) return;
+    decodedLetters.push(currentSymbols);
+    const ch = REVERSE_MORSE[currentSymbols] || '?';
+    decodedText += ch;
+    currentSymbols = '';
+    updateRxTape();
+    updateRxText();
+  }
+
+  function handleOnPulse(duration){
+    if (unit === null){
+      unit = Math.max(duration, 40);
+      currentSymbols += '.';
+    } else if (duration < unit * 2){
+      currentSymbols += '.';
+      unit = unit * 0.75 + duration * 0.25; // adapt toward observed dot length
+    } else {
+      currentSymbols += '-';
+    }
+    updateRxTape();
+  }
+
+  function handleOffPulse(duration){
+    if (unit === null) return;
+    if (duration < unit * 1.8){
+      // still the same letter
+    } else if (duration < unit * 5){
+      finalizeLetter();
+    } else {
+      finalizeLetter();
+      if (!decodedText.endsWith(' ')){
+        decodedText += ' ';
+        updateRxText();
+      }
+    }
+  }
+
+  function luminanceFromFrame(){
+    const vw = $rxVideo.videoWidth, vh = $rxVideo.videoHeight;
+    if (!vw || !vh) return null;
+    const sx = vw * 0.25, sy = vh * 0.25, sw = vw * 0.5, sh = vh * 0.5;
+    rxCtx.drawImage($rxVideo, sx, sy, sw, sh, 0, 0, SAMPLE, SAMPLE);
+    const data = rxCtx.getImageData(0, 0, SAMPLE, SAMPLE).data;
+    let sum = 0, count = 0;
+    for (let i = 0; i < data.length; i += 4){
+      sum += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+      count++;
+    }
+    return sum / count;
+  }
+
+  function rxLoop(){
+    if (!rxRunning) return;
+    const b = luminanceFromFrame();
+    const now = performance.now();
+
+    if (b !== null){
+      brightWindow.push(b);
+      if (brightWindow.length > WINDOW_SIZE) brightWindow.shift();
+      const min = Math.min(...brightWindow);
+      const max = Math.min(255, Math.max(...brightWindow));
+      const contrast = max - min;
+
+      $signalFill.style.width = Math.max(0, Math.min(100, ((b - min) / (contrast || 1)) * 100)) + '%';
+
+      if (contrast < 18){
+        $signalLabel.textContent = '訊號太弱，請對準閃爍光源並靠近一些';
+      } else {
+        $signalLabel.textContent = '訊號強度良好';
+        const mid = (min + max) / 2;
+        const delta = Math.max(contrast * 0.18, 4);
+        const upper = mid + delta, lower = mid - delta;
+        let rawState = confirmedState;
+        if (b > upper) rawState = true;
+        else if (b < lower) rawState = false;
+
+        if (rawState !== confirmedState){
+          if (rawState === candidateState){
+            candidateCount++;
+          } else {
+            candidateState = rawState;
+            candidateCount = 1;
+          }
+          if (candidateCount >= CONFIRM_FRAMES){
+            if (lastTransitionTime !== null){
+              const duration = now - lastTransitionTime;
+              if (confirmedState) handleOnPulse(duration);
+              else handleOffPulse(duration);
+            }
+            confirmedState = rawState;
+            $rxLamp.classList.toggle('on', confirmedState);
+            lastTransitionTime = now;
+            candidateCount = 0;
+          }
+        } else {
+          candidateCount = 0;
+        }
+
+        // auto-flush a finished letter after a long trailing silence
+        if (!confirmedState && unit && lastTransitionTime !== null && currentSymbols){
+          if (now - lastTransitionTime > unit * 6) finalizeLetter();
+        }
+      }
+    }
+
+    rxRafId = requestAnimationFrame(rxLoop);
+  }
+
+  async function startReceiving(){
+    $rxEnableBtn.disabled = true;
+    $rxEnableBtn.textContent = '正在請求相機權限…';
+    try{
+      rxStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } }
+      });
+      $rxVideo.srcObject = rxStream;
+      await $rxVideo.play();
+      $scopePlaceholder.style.display = 'none';
+      $crosshair.style.display = 'block';
+      $rxStatus.textContent = '接收中 · 對準閃爍的光源';
+      $rxStatus.className = 'lamp-status ok';
+      $rxEnableBtn.textContent = '接收中';
+      $rxStopBtn.disabled = false;
+      resetDecoder();
+      rxRunning = true;
+      rxRafId = requestAnimationFrame(rxLoop);
+    } catch(err){
+      $rxStatus.textContent = '相機權限被拒絕或無法使用';
+      $rxStatus.className = 'lamp-status err';
+      $rxEnableBtn.textContent = '重新嘗試啟用鏡頭';
+      $rxEnableBtn.disabled = false;
+    }
+  }
+
+  function stopReceiving(){
+    rxRunning = false;
+    if (rxRafId) cancelAnimationFrame(rxRafId);
+    if (rxStream){
+      rxStream.getTracks().forEach(t => t.stop());
+      rxStream = null;
+    }
+    $rxVideo.srcObject = null;
+    $scopePlaceholder.style.display = 'flex';
+    $crosshair.style.display = 'none';
+    $rxLamp.classList.remove('on');
+    $rxStatus.textContent = '已停止接收';
+    $rxStatus.className = 'lamp-status';
+    $rxEnableBtn.disabled = false;
+    $rxEnableBtn.textContent = '啟用鏡頭並開始接收';
+    $rxStopBtn.disabled = true;
+  }
+
+  $rxEnableBtn.addEventListener('click', startReceiving);
+  $rxStopBtn.addEventListener('click', stopReceiving);
+  $rxClearBtn.addEventListener('click', resetDecoder);
+
+  resetDecoder();
+})();
+</script>
+</body>
+</html>
