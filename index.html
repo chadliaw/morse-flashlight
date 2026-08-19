@@ -430,6 +430,12 @@
           <span class="check-sub">送完一輪後暫停約 2.5 秒，自動重送，直到按下停止</span>
         </label>
       </div>
+      <div class="check-row">
+        <input type="checkbox" id="colorModeChk">
+        <label for="colorModeChk">使用顏色模式（白＝點、紅＝劃）
+          <span class="check-sub">用顏色分辨點劃，不再靠閃光時間長短判斷，準確率更高、傳送也更快；此模式下手電筒/LED 會被忽略，一律用螢幕全彩顯示</span>
+        </label>
+      </div>
     </div>
 
     <div class="btn-group">
@@ -461,6 +467,13 @@
       <div class="lamp-status" id="rxStatus">尚未啟用鏡頭</div>
     </div>
 
+    <div class="check-row" style="margin-bottom:14px;">
+      <input type="checkbox" id="rxColorChk">
+      <label for="rxColorChk">用顏色分類接收（白＝點、紅＝劃）
+        <span class="check-sub">請確認對方的「發送」頁也開啟了顏色模式，兩邊設定要一致</span>
+      </label>
+    </div>
+
     <button class="btn-enable" id="rxEnableBtn">啟用鏡頭並開始接收</button>
 
     <div class="btn-group" style="margin-bottom:16px;">
@@ -481,7 +494,8 @@
     <footer>
       這個方向只需要一般鏡頭權限，iOS / Android 都可使用。請將取景框對準閃爍的燈光，環境越暗、光源越單純，辨識越準確。<br>
       建議對方用「發送」頁的全螢幕白光（而不是手電筒）當光源，對比更明顯、辨識率更高；速度也建議放慢（8–12 WPM 左右）。<br>
-      如果對方有開啟「傳送前加上校正碼」，解碼文字開頭會出現一段 EEEEEE，這是正常的，直接忽略即可。
+      如果對方有開啟「傳送前加上校正碼」，接收端會自動偵測並移除開頭的 EEEEEE，只留下正文。<br>
+      顏色模式下點劃改用顏色判斷，不再依賴閃光時間長短，通常比純明暗模式更準；記得兩邊的顏色模式開關要一致。
     </footer>
   </section>
 
@@ -535,12 +549,14 @@
     }).filter(w => w.length > 0);
   }
 
-  function morseToPulses(words){
+  function morseToPulses(words, opts){
+    const equalize = !!(opts && opts.equalize);
     const pulses = [];
     words.forEach((word, wi) => {
       word.forEach((letter, li) => {
         [...letter].forEach((sym, si) => {
-          pulses.push({ on:true, units: sym === '.' ? 1 : 3 });
+          const dashUnits = equalize ? 1 : 3;
+          pulses.push({ on:true, units: sym === '.' ? 1 : dashUnits, symbol: sym });
           if (si < letter.length - 1) pulses.push({ on:false, units:1 });
         });
         if (li < word.length - 1) pulses.push({ on:false, units:3 });
@@ -566,6 +582,7 @@
   const $screenFlash = document.getElementById('screenFlash');
   const $calibrateChk = document.getElementById('calibrateChk');
   const $loopChk = document.getElementById('loopChk');
+  const $colorModeChk = document.getElementById('colorModeChk');
 
   const CALIBRATION_PREFIX = 'EEEEEE ';
   const LOOP_PAUSE_MS = 2500;
@@ -625,10 +642,12 @@
   }
   $enableBtn.addEventListener('click', enableTorch);
 
-  function setLight(on){
+  function setLight(on, color){
     $lamp.classList.toggle('on', on);
+    $screenFlash.style.background = (on && color === 'red') ? '#ff2b1f' : '#ffffff';
     $screenFlash.classList.toggle('on', on);
-    if (torchSupported && track){
+    const colorModeOn = $colorModeChk.checked;
+    if (!colorModeOn && torchSupported && track){
       track.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {
         torchSupported = false;
         $lampStatus.textContent = '手電筒控制中斷 · 改用螢幕燈號';
@@ -646,6 +665,7 @@
     $wpm.disabled = isPlaying;
     $calibrateChk.disabled = isPlaying;
     $loopChk.disabled = isPlaying;
+    $colorModeChk.disabled = isPlaying;
     $playBtn.textContent = isPlaying ? '發送中…' : '▶ 開始發送';
   }
 
@@ -653,7 +673,8 @@
     const words = sentenceToMorse(getEffectiveText());
     if (words.length === 0) return;
 
-    const pulses = morseToPulses(words);
+    const colorMode = $colorModeChk.checked;
+    const pulses = morseToPulses(words, { equalize: colorMode });
     const wpm = parseInt($wpm.value, 10);
     const unitMs = 1200 / wpm;
 
@@ -671,7 +692,7 @@
           return;
         }
         const p = pulses[i++];
-        setLight(p.on);
+        setLight(p.on, colorMode && p.symbol === '-' ? 'red' : 'white');
         setTimeout(step, p.units * unitMs);
       }
       step();
@@ -722,6 +743,7 @@
   const $unitLabel = document.getElementById('unitLabel');
   const $rxTape = document.getElementById('rxTape');
   const $rxText = document.getElementById('rxText');
+  const $rxColorChk = document.getElementById('rxColorChk');
 
   let rxStream = null;
   let rxRunning = false;
@@ -745,6 +767,8 @@
   let currentSymbols = '';   // dots/dashes for the letter in progress
   let decodedLetters = [];   // finished letters/spaces as morse groups, for the tape display
   let decodedText = '';
+  let calibrationChecked = false; // whether we've already looked for a leading EEEEEE prefix
+  let colorAccum = { r:0, g:0, b:0, n:0 }; // accumulates colour samples during the current ON phase
 
   function resetDecoder(){
     brightWindow = [];
@@ -756,6 +780,8 @@
     currentSymbols = '';
     decodedLetters = [];
     decodedText = '';
+    calibrationChecked = false;
+    colorAccum = { r:0, g:0, b:0, n:0 };
     updateRxTape();
     updateRxText();
     $signalFill.style.width = '0%';
@@ -794,17 +820,24 @@
     updateRxText();
   }
 
-  function handleOnPulse(duration){
+  function handleOnPulse(duration, colorClass){
     const MIN_UNIT = 45; // floor, to stop noise from collapsing the estimate
-    if (unit === null){
-      unit = Math.max(duration, MIN_UNIT);
-    } else if (duration < unit){
-      // a shorter pulse than our current baseline means the real dot is
-      // shorter than we thought — shrink the estimate toward it
-      unit = Math.max(duration, MIN_UNIT);
+    if (colorClass){
+      // colour tells us the symbol directly; in colour mode every ON pulse is
+      // sent at the same length, so its duration is a clean sample of 1 unit
+      if (unit === null) unit = Math.max(duration, MIN_UNIT);
+      else unit = unit * 0.7 + Math.max(duration, MIN_UNIT) * 0.3;
+      currentSymbols += (colorClass === 'dash' ? '-' : '.');
+    } else {
+      if (unit === null){
+        unit = Math.max(duration, MIN_UNIT);
+      } else if (duration < unit){
+        // a shorter pulse than our current baseline means the real dot is
+        // shorter than we thought — shrink the estimate toward it
+        unit = Math.max(duration, MIN_UNIT);
+      }
+      currentSymbols += (duration < unit * 1.9 ? '.' : '-');
     }
-    const symbol = duration < unit * 1.9 ? '.' : '-';
-    currentSymbols += symbol;
     updateRxTape();
     $unitLabel.textContent = `單位長度約 ${Math.round(unit)}ms（約 ${Math.round(1200/unit)} WPM）`;
   }
@@ -817,6 +850,17 @@
       finalizeLetter();
     } else {
       finalizeLetter();
+      if (!calibrationChecked){
+        calibrationChecked = true;
+        if (/^E{3,}$/.test(decodedText)){
+          // this was just the calibration prefix — drop it and start clean
+          decodedText = '';
+          decodedLetters = [];
+          updateRxTape();
+          updateRxText();
+          return;
+        }
+      }
       if (!decodedText.endsWith(' ')){
         decodedText += ' ';
         updateRxText();
@@ -824,26 +868,38 @@
     }
   }
 
-  function luminanceFromFrame(){
+  function classifyColor(r, g, b){
+    const mx = Math.max(r, g, b);
+    if (mx < 30) return null; // too dark to tell colour apart
+    const isRed = r > mx * 0.7 && g < mx * 0.5 && b < mx * 0.5;
+    return isRed ? 'dash' : 'dot';
+  }
+
+  function sampleFrame(){
     const vw = $rxVideo.videoWidth, vh = $rxVideo.videoHeight;
     if (!vw || !vh) return null;
     const sx = vw * 0.25, sy = vh * 0.25, sw = vw * 0.5, sh = vh * 0.5;
     rxCtx.drawImage($rxVideo, sx, sy, sw, sh, 0, 0, SAMPLE, SAMPLE);
     const data = rxCtx.getImageData(0, 0, SAMPLE, SAMPLE).data;
-    let sum = 0, count = 0;
+    let sr = 0, sg = 0, sb = 0, count = 0;
     for (let i = 0; i < data.length; i += 4){
-      sum += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+      sr += data[i]; sg += data[i+1]; sb += data[i+2];
       count++;
     }
-    return sum / count;
+    const r = sr / count, g = sg / count, b = sb / count;
+    // use the strongest channel as "brightness" so a pure red pulse
+    // registers as clearly ON, same as a pure white pulse — brightness
+    // detection stays colour-agnostic, only the classifier cares about hue
+    return { brightness: Math.max(r, g, b), r, g, b };
   }
 
   function rxLoop(){
     if (!rxRunning) return;
-    const b = luminanceFromFrame();
+    const frame = sampleFrame();
     const now = performance.now();
 
-    if (b !== null){
+    if (frame !== null){
+      const b = frame.brightness;
       brightWindow.push(b);
       if (brightWindow.length > WINDOW_SIZE) brightWindow.shift();
       const min = Math.min(...brightWindow);
@@ -872,10 +928,22 @@
           } else if (candidateSince !== null && (now - candidateSince) >= confirmMs){
             if (lastTransitionTime !== null){
               const duration = now - lastTransitionTime;
-              if (confirmedState) handleOnPulse(duration);
-              else handleOffPulse(duration);
+              if (confirmedState){
+                let colorClass = null;
+                if ($rxColorChk.checked && colorAccum.n > 0){
+                  colorClass = classifyColor(
+                    colorAccum.r / colorAccum.n,
+                    colorAccum.g / colorAccum.n,
+                    colorAccum.b / colorAccum.n
+                  );
+                }
+                handleOnPulse(duration, colorClass);
+              } else {
+                handleOffPulse(duration);
+              }
             }
             confirmedState = rawState;
+            colorAccum = { r:0, g:0, b:0, n:0 }; // fresh accumulator for the phase that just started
             $rxLamp.classList.toggle('on', confirmedState);
             lastTransitionTime = now;
             candidateState = rawState;
@@ -884,6 +952,10 @@
         } else {
           candidateState = confirmedState;
           candidateSince = null;
+        }
+
+        if (confirmedState){
+          colorAccum.r += frame.r; colorAccum.g += frame.g; colorAccum.b += frame.b; colorAccum.n++;
         }
 
         // auto-flush a finished letter after a long trailing silence
