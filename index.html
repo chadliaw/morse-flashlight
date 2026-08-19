@@ -333,9 +333,21 @@
   @media (prefers-reduced-motion: reduce){
     .lamp, .lamp::before, .lamp-core{ transition:none; }
   }
+
+  /* --- Full-screen flash (screen-light fallback) --- */
+  .screen-flash{
+    position:fixed;
+    inset:0;
+    background:#ffffff;
+    opacity:0;
+    pointer-events:none;
+    z-index:999;
+  }
+  .screen-flash.on{ opacity:1; }
 </style>
 </head>
 <body>
+<div class="screen-flash" id="screenFlash"></div>
 <div class="wrap">
 
   <div class="eyebrow">LIGHT SIGNAL / 燈語收發</div>
@@ -383,7 +395,7 @@
 
     <footer>
       手電筒控制需要相機權限，且僅在部分 Android + Chrome 瀏覽器支援（iOS Safari 目前不支援網頁控制手電筒）。<br>
-      若手電筒無法使用，畫面上的燈號仍會依照正確節奏閃爍，可作為視覺替代方案。
+      若手電筒無法使用，整個螢幕仍會依照正確節奏閃爍成大面積白光，可作為視覺替代方案，發送時建議把螢幕亮度調到最高。
     </footer>
   </section>
 
@@ -398,6 +410,7 @@
 
     <div class="signal-bar"><div class="signal-fill" id="signalFill"></div></div>
     <div class="signal-label" id="signalLabel">訊號強度</div>
+    <div class="signal-label" id="unitLabel" style="margin-top:-10px;">尚未校正單位長度</div>
 
     <div class="lamp-stage" style="padding-top:0;">
       <div class="lamp" id="rxLamp"><div class="lamp-core"></div></div>
@@ -423,7 +436,7 @@
 
     <footer>
       這個方向只需要一般鏡頭權限，iOS / Android 都可使用。請將取景框對準閃爍的燈光，環境越暗、光源越單純，辨識越準確。<br>
-      系統會自動抓取對方閃燈的速度，開始接收後建議先送幾個穩定的點（· · ·）讓它校正節奏。
+      建議對方用「發送」頁的全螢幕白光（而不是手電筒）當光源，對比更明顯、辨識率更高；速度也建議放慢（8–12 WPM 左右），前幾個字母是系統校正節奏的過程，可能不準，抓穩後會越來越準。
     </footer>
   </section>
 
@@ -505,6 +518,7 @@
   const $enableBtn = document.getElementById('enableBtn');
   const $lamp = document.getElementById('lamp');
   const $lampStatus = document.getElementById('lampStatus');
+  const $screenFlash = document.getElementById('screenFlash');
 
   function renderTape(){
     const words = sentenceToMorse($input.value);
@@ -557,6 +571,7 @@
 
   function setLight(on){
     $lamp.classList.toggle('on', on);
+    $screenFlash.classList.toggle('on', on);
     if (torchSupported && track){
       track.applyConstraints({ advanced: [{ torch: on }] }).catch(() => {
         torchSupported = false;
@@ -631,6 +646,7 @@
   const $rxStatus = document.getElementById('rxStatus');
   const $signalFill = document.getElementById('signalFill');
   const $signalLabel = document.getElementById('signalLabel');
+  const $unitLabel = document.getElementById('unitLabel');
   const $rxTape = document.getElementById('rxTape');
   const $rxText = document.getElementById('rxText');
 
@@ -643,16 +659,16 @@
   rxCanvas.width = SAMPLE; rxCanvas.height = SAMPLE;
   const rxCtx = rxCanvas.getContext('2d', { willReadFrequently: true });
 
-  const CONFIRM_FRAMES = 2;
+  const CONFIRM_MS_DEFAULT = 40; // used before unit is calibrated
   const WINDOW_SIZE = 45; // ~ frames used to auto-calibrate brightness range
 
   let brightWindow = [];
   let confirmedState = false;
   let candidateState = false;
-  let candidateCount = 0;
+  let candidateSince = null;
   let lastTransitionTime = null;
 
-  let unit = null;           // estimated dot length in ms
+  let unit = null;           // estimated dot length in ms (shrinks toward the true value)
   let currentSymbols = '';   // dots/dashes for the letter in progress
   let decodedLetters = [];   // finished letters/spaces as morse groups, for the tape display
   let decodedText = '';
@@ -661,7 +677,7 @@
     brightWindow = [];
     confirmedState = false;
     candidateState = false;
-    candidateCount = 0;
+    candidateSince = null;
     lastTransitionTime = null;
     unit = null;
     currentSymbols = '';
@@ -671,6 +687,7 @@
     updateRxText();
     $signalFill.style.width = '0%';
     $signalLabel.textContent = '訊號強度';
+    $unitLabel.textContent = '尚未校正單位長度';
   }
 
   function updateRxTape(){
@@ -705,16 +722,18 @@
   }
 
   function handleOnPulse(duration){
+    const MIN_UNIT = 45; // floor, to stop noise from collapsing the estimate
     if (unit === null){
-      unit = Math.max(duration, 40);
-      currentSymbols += '.';
-    } else if (duration < unit * 2){
-      currentSymbols += '.';
-      unit = unit * 0.75 + duration * 0.25; // adapt toward observed dot length
-    } else {
-      currentSymbols += '-';
+      unit = Math.max(duration, MIN_UNIT);
+    } else if (duration < unit){
+      // a shorter pulse than our current baseline means the real dot is
+      // shorter than we thought — shrink the estimate toward it
+      unit = Math.max(duration, MIN_UNIT);
     }
+    const symbol = duration < unit * 1.9 ? '.' : '-';
+    currentSymbols += symbol;
     updateRxTape();
+    $unitLabel.textContent = `單位長度約 ${Math.round(unit)}ms（約 ${Math.round(1200/unit)} WPM）`;
   }
 
   function handleOffPulse(duration){
@@ -771,14 +790,13 @@
         if (b > upper) rawState = true;
         else if (b < lower) rawState = false;
 
+        const confirmMs = unit ? Math.max(15, unit * 0.25) : CONFIRM_MS_DEFAULT;
+
         if (rawState !== confirmedState){
-          if (rawState === candidateState){
-            candidateCount++;
-          } else {
+          if (rawState !== candidateState){
             candidateState = rawState;
-            candidateCount = 1;
-          }
-          if (candidateCount >= CONFIRM_FRAMES){
+            candidateSince = now;
+          } else if (candidateSince !== null && (now - candidateSince) >= confirmMs){
             if (lastTransitionTime !== null){
               const duration = now - lastTransitionTime;
               if (confirmedState) handleOnPulse(duration);
@@ -787,10 +805,12 @@
             confirmedState = rawState;
             $rxLamp.classList.toggle('on', confirmedState);
             lastTransitionTime = now;
-            candidateCount = 0;
+            candidateState = rawState;
+            candidateSince = null;
           }
         } else {
-          candidateCount = 0;
+          candidateState = confirmedState;
+          candidateSince = null;
         }
 
         // auto-flush a finished letter after a long trailing silence
