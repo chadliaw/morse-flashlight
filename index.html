@@ -257,6 +257,34 @@
     margin-bottom:14px;
   }
 
+  .check-row{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    margin-bottom:12px;
+  }
+  .check-row:last-child{ margin-bottom:0; }
+  .check-row input[type=checkbox]{
+    width:19px; height:19px;
+    accent-color:var(--amber);
+    flex-shrink:0;
+    margin-top:1px;
+  }
+  .check-row label{
+    margin-bottom:0;
+    font-size:14px;
+    font-weight:500;
+    color:var(--text);
+    line-height:1.4;
+  }
+  .check-row .check-sub{
+    display:block;
+    font-size:12px;
+    font-weight:400;
+    color:var(--text-dim);
+    margin-top:2px;
+  }
+
   /* --- Receive / camera view --- */
   .scope{
     position:relative;
@@ -388,6 +416,22 @@
       <input type="range" id="wpm" min="4" max="30" value="12" step="1">
     </div>
 
+    <div class="panel">
+      <label style="margin-bottom:12px;">傳送設定</label>
+      <div class="check-row">
+        <input type="checkbox" id="calibrateChk" checked>
+        <label for="calibrateChk">傳送前加上校正碼
+          <span class="check-sub">先送一串純點（EEEEEE），讓接收端在正文開始前就校正好節奏</span>
+        </label>
+      </div>
+      <div class="check-row">
+        <input type="checkbox" id="loopChk">
+        <label for="loopChk">循環重複發送
+          <span class="check-sub">送完一輪後暫停約 2.5 秒，自動重送，直到按下停止</span>
+        </label>
+      </div>
+    </div>
+
     <div class="btn-group">
       <button class="btn-primary" id="playBtn">▶ 開始發送</button>
       <button class="btn-secondary" id="stopBtn" disabled>■ 停止</button>
@@ -436,7 +480,8 @@
 
     <footer>
       這個方向只需要一般鏡頭權限，iOS / Android 都可使用。請將取景框對準閃爍的燈光，環境越暗、光源越單純，辨識越準確。<br>
-      建議對方用「發送」頁的全螢幕白光（而不是手電筒）當光源，對比更明顯、辨識率更高；速度也建議放慢（8–12 WPM 左右），前幾個字母是系統校正節奏的過程，可能不準，抓穩後會越來越準。
+      建議對方用「發送」頁的全螢幕白光（而不是手電筒）當光源，對比更明顯、辨識率更高；速度也建議放慢（8–12 WPM 左右）。<br>
+      如果對方有開啟「傳送前加上校正碼」，解碼文字開頭會出現一段 EEEEEE，這是正常的，直接忽略即可。
     </footer>
   </section>
 
@@ -519,9 +564,19 @@
   const $lamp = document.getElementById('lamp');
   const $lampStatus = document.getElementById('lampStatus');
   const $screenFlash = document.getElementById('screenFlash');
+  const $calibrateChk = document.getElementById('calibrateChk');
+  const $loopChk = document.getElementById('loopChk');
+
+  const CALIBRATION_PREFIX = 'EEEEEE ';
+  const LOOP_PAUSE_MS = 2500;
+
+  function getEffectiveText(){
+    const prefix = $calibrateChk.checked ? CALIBRATION_PREFIX : '';
+    return prefix + $input.value;
+  }
 
   function renderTape(){
-    const words = sentenceToMorse($input.value);
+    const words = sentenceToMorse(getEffectiveText());
     if (words.length === 0){
       $tape.textContent = '（輸入文字後，這裡會顯示對應的摩斯電碼）';
       $tape.classList.add('empty');
@@ -531,6 +586,7 @@
     }
   }
   $input.addEventListener('input', renderTape);
+  $calibrateChk.addEventListener('change', renderTape);
   renderTape();
 
   $wpm.addEventListener('input', () => {
@@ -588,11 +644,13 @@
     $stopBtn.disabled = !isPlaying;
     $input.disabled = isPlaying;
     $wpm.disabled = isPlaying;
+    $calibrateChk.disabled = isPlaying;
+    $loopChk.disabled = isPlaying;
     $playBtn.textContent = isPlaying ? '發送中…' : '▶ 開始發送';
   }
 
   function play(){
-    const words = sentenceToMorse($input.value);
+    const words = sentenceToMorse(getEffectiveText());
     if (words.length === 0) return;
 
     const pulses = morseToPulses(words);
@@ -603,19 +661,34 @@
     const myGen = generation;
     setPlayingUI(true);
 
-    let i = 0;
-    function step(){
-      if (myGen !== generation) return;
-      if (i >= pulses.length){
-        setLight(false);
-        setPlayingUI(false);
-        return;
+    function runOnce(onDone){
+      let i = 0;
+      function step(){
+        if (myGen !== generation) return;
+        if (i >= pulses.length){
+          setLight(false);
+          onDone();
+          return;
+        }
+        const p = pulses[i++];
+        setLight(p.on);
+        setTimeout(step, p.units * unitMs);
       }
-      const p = pulses[i++];
-      setLight(p.on);
-      setTimeout(step, p.units * unitMs);
+      step();
     }
-    step();
+
+    function cycle(){
+      if (myGen !== generation) return;
+      runOnce(() => {
+        if (myGen !== generation) return;
+        if ($loopChk.checked){
+          setTimeout(() => { if (myGen === generation) cycle(); }, LOOP_PAUSE_MS);
+        } else {
+          setPlayingUI(false);
+        }
+      });
+    }
+    cycle();
   }
 
   function stop(){
