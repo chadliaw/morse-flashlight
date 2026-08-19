@@ -467,6 +467,13 @@
       <div class="lamp-status" id="rxStatus">尚未啟用鏡頭</div>
     </div>
 
+    <div class="check-row" style="margin-bottom:8px;">
+      <input type="checkbox" id="rxCalibrationChk" checked>
+      <label for="rxCalibrationChk">用校正碼建立點/劃門檻
+        <span class="check-sub">需要對方開啟「傳送前加上校正碼」；用開頭 EEEEEE 的 6 段點訊號算出平均長度與 98% 信賴區間，作為之後判斷點/劃的依據。顏色模式開啟時此選項不會作用</span>
+      </label>
+    </div>
+
     <div class="check-row" style="margin-bottom:14px;">
       <input type="checkbox" id="rxColorChk">
       <label for="rxColorChk">用顏色分類接收（白＝點、紅＝劃）
@@ -495,7 +502,8 @@
       這個方向只需要一般鏡頭權限，iOS / Android 都可使用。請將取景框對準閃爍的燈光，環境越暗、光源越單純，辨識越準確。<br>
       建議對方用「發送」頁的全螢幕白光（而不是手電筒）當光源，對比更明顯、辨識率更高；速度也建議放慢（8–12 WPM 左右）。<br>
       如果對方有開啟「傳送前加上校正碼」，接收端會自動偵測並移除開頭的 EEEEEE，只留下正文。<br>
-      顏色模式下點劃改用顏色判斷，不再依賴閃光時間長短，通常比純明暗模式更準；記得兩邊的顏色模式開關要一致。
+      顏色模式下點劃改用顏色判斷，不再依賴閃光時間長短，通常比純明暗模式更準；記得兩邊的顏色模式開關要一致。<br>
+      「用校正碼建立點/劃門檻」會用開頭 EEEEEE 的 6 段點訊號，統計出平均長度與 98% 信賴區間，之後用這個固定門檻判斷點/劃，比單純看時間長短更穩定；請確保對方也有開啟校正碼。
     </footer>
   </section>
 
@@ -744,6 +752,7 @@
   const $rxTape = document.getElementById('rxTape');
   const $rxText = document.getElementById('rxText');
   const $rxColorChk = document.getElementById('rxColorChk');
+  const $rxCalibrationChk = document.getElementById('rxCalibrationChk');
 
   let rxStream = null;
   let rxRunning = false;
@@ -767,8 +776,14 @@
   let currentSymbols = '';   // dots/dashes for the letter in progress
   let decodedLetters = [];   // finished letters/spaces as morse groups, for the tape display
   let decodedText = '';
-  let calibrationChecked = false; // whether we've already looked for a leading EEEEEE prefix
+  let calibrationChecked = false; // whether we've already looked for a leading EEEEEE prefix (regex fallback)
   let colorAccum = { r:0, g:0, b:0, n:0 }; // accumulates colour samples during the current ON phase
+
+  const CALIBRATION_SAMPLE_COUNT = 6; // matches CALIBRATION_PREFIX's 6 dots (EEEEEE)
+  const Z_98 = 2.326; // two-tailed 98% z-score, assuming Gaussian timing noise
+  let statCalibrating = false;   // actively collecting the 6 known-dot samples
+  let statCalibrationSamples = [];
+  let dotThreshold = null;       // duration (ms) above which an ON pulse is classified as a dash
 
   function resetDecoder(){
     brightWindow = [];
@@ -782,11 +797,29 @@
     decodedText = '';
     calibrationChecked = false;
     colorAccum = { r:0, g:0, b:0, n:0 };
+    dotThreshold = null;
+    statCalibrationSamples = [];
+    statCalibrating = $rxCalibrationChk.checked && !$rxColorChk.checked;
     updateRxTape();
     updateRxText();
     $signalFill.style.width = '0%';
     $signalLabel.textContent = '訊號強度';
-    $unitLabel.textContent = '尚未校正單位長度';
+    $unitLabel.textContent = statCalibrating
+      ? `等待校正碼（EEEEEE）… 0/${CALIBRATION_SAMPLE_COUNT}`
+      : '尚未校正單位長度';
+  }
+
+  function finishStatCalibration(){
+    const n = statCalibrationSamples.length;
+    const mean = statCalibrationSamples.reduce((a, d) => a + d, 0) / n;
+    const variance = statCalibrationSamples.reduce((a, d) => a + (d - mean) * (d - mean), 0) / Math.max(1, n - 1);
+    const std = Math.max(Math.sqrt(variance), mean * 0.05, 6); // floor avoids a degenerate, too-tight interval
+    unit = mean;
+    dotThreshold = mean + Z_98 * std;
+    statCalibrating = false;
+    currentSymbols = ''; // discard the calibration dots themselves — they aren't part of the message
+    updateRxTape();
+    $unitLabel.textContent = `校正完成 · 點長度約 ${Math.round(mean)}ms，98% 門檻 ${Math.round(dotThreshold)}ms`;
   }
 
   function updateRxTape(){
@@ -828,18 +861,37 @@
       if (unit === null) unit = Math.max(duration, MIN_UNIT);
       else unit = unit * 0.7 + Math.max(duration, MIN_UNIT) * 0.3;
       currentSymbols += (colorClass === 'dash' ? '-' : '.');
+      updateRxTape();
+      $unitLabel.textContent = `單位長度約 ${Math.round(unit)}ms（約 ${Math.round(1200/unit)} WPM）`;
+      return;
+    }
+
+    if (statCalibrating){
+      // this pulse is a known dot from the EEEEEE calibration prefix
+      statCalibrationSamples.push(duration);
+      $unitLabel.textContent = `等待校正碼（EEEEEE）… ${statCalibrationSamples.length}/${CALIBRATION_SAMPLE_COUNT}`;
+      if (statCalibrationSamples.length >= CALIBRATION_SAMPLE_COUNT){
+        finishStatCalibration();
+      }
+      return;
+    }
+
+    if (dotThreshold !== null){
+      // classify using the 98% confidence boundary learned during calibration
+      currentSymbols += (duration <= dotThreshold ? '.' : '-');
     } else {
+      // no calibration available — fall back to the adaptive shrink-to-minimum method
       if (unit === null){
         unit = Math.max(duration, MIN_UNIT);
       } else if (duration < unit){
-        // a shorter pulse than our current baseline means the real dot is
-        // shorter than we thought — shrink the estimate toward it
         unit = Math.max(duration, MIN_UNIT);
       }
       currentSymbols += (duration < unit * 1.9 ? '.' : '-');
     }
     updateRxTape();
-    $unitLabel.textContent = `單位長度約 ${Math.round(unit)}ms（約 ${Math.round(1200/unit)} WPM）`;
+    $unitLabel.textContent = dotThreshold !== null
+      ? `單位長度約 ${Math.round(unit)}ms · 98% 門檻 ${Math.round(dotThreshold)}ms`
+      : `單位長度約 ${Math.round(unit)}ms（約 ${Math.round(1200/unit)} WPM）`;
   }
 
   function handleOffPulse(duration){
@@ -861,7 +913,7 @@
           return;
         }
       }
-      if (!decodedText.endsWith(' ')){
+      if (decodedText && !decodedText.endsWith(' ')){
         decodedText += ' ';
         updateRxText();
       }
